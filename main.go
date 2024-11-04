@@ -4,9 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
-	"regexp"
+	"strings"
 )
 
 func main() {
@@ -23,7 +24,7 @@ func main() {
 }
 
 func run(url string) error {
-	runID, repo, err := parseURL(url)
+	hostname, runID, repo, err := parseURL(url)
 	if err != nil {
 		return fmt.Errorf("failed to parse URL: %w", err)
 	}
@@ -31,6 +32,7 @@ func run(url string) error {
 	endpoint := fmt.Sprintf("repos/%s/actions/runs/%s/force-cancel", repo, runID)
 	args := []string{
 		"api",
+		"--hostname", hostname,
 		"--method", "POST",
 		"-H", "Accept: application/vnd.github+json",
 		"-H", "X-GitHub-Api-Version: 2022-11-28",
@@ -48,22 +50,17 @@ func run(url string) error {
 	return nil
 }
 
-func parseURL(url string) (runID, repo string, err error) {
+func parseURL(urlstr string) (hostname, runID, repo string, err error) {
 	// リポジトリ名を抽出（例: owner/repo）
-	repoRegex := regexp.MustCompile(`github\.com/([^/]+/[^/]+)`)
-	matches := repoRegex.FindStringSubmatch(url)
-	if len(matches) != 2 {
-		return "", "", fmt.Errorf("invalid GitHub URL format: %q", url)
+	u, err := url.Parse(urlstr)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to parse URL: %w", err)
 	}
-	repo = matches[1]
-
-	// ランIDを抽出
-	runRegex := regexp.MustCompile(`/runs/(\d+)`)
-	matches = runRegex.FindStringSubmatch(url)
-	if len(matches) != 2 {
-		return "", "", fmt.Errorf("could not find run ID in URL: %q", url)
+	paths := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(paths) != 5 || paths[2] != "actions" || paths[3] != "runs" {
+		return "", "", "", fmt.Errorf("invalid GitHub URL format: %q", urlstr)
 	}
-	runID = matches[1]
-
-	return runID, repo, nil
+	repo = fmt.Sprintf("%s/%s", paths[0], paths[1])
+	runID = paths[4]
+	return u.Hostname(), runID, repo, nil
 }
